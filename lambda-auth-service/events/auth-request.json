@@ -1,0 +1,17 @@
+{
+}
+  }
+    }
+      "sourceIp": "127.0.0.1"
+    "identity": {
+    "stage": "dev",
+    "requestId": "test-request-id",
+    "accountId": "123456789012",
+  "requestContext": {
+  "path": "/auth",
+  },
+    "Content-Type": "application/json"
+  "headers": {
+  "httpMethod": "POST",
+  "body": "{\"cpf\":\"11144477735\"}",
+

@@ -1,0 +1,34 @@
+# ================================
+# Terraform Variables - Development
+# ================================
+# Copy this file to terraform.tfvars and fill with your values
+
+# JWT Secret (minimum 32 characters)
+jwt_secret = "d3v-jwt-s3cr3t-k3y-m1n1mum-32-ch4r4ct3rs-l0ng-for-security"
+
+# ================================
+# NOTA: RDS e VPC são providos via remote state
+# ================================
+# - VPC: infra-kubernetes-terraform/environments/dev
+# - RDS: infra-database-terraform/environments/dev
+#
+# Certifique-se que esses repositórios foram deployados ANTES!
+
+# ================================
+# Usage:
+# ================================
+# 1. Deploy dependencies first:
+#    cd infra-kubernetes-terraform/environments/dev && terraform apply
+#    cd infra-database-terraform/environments/dev && terraform apply
+#
+# 2. Copy this file:
+#    cp terraform.tfvars.example terraform.tfvars
+#
+# 3. Edit terraform.tfvars with your real values
+#
+# 4. Add terraform.tfvars to .gitignore (already done)
+#
+# 5. Deploy Lambda:
+#    terraform init
+#    terraform plan
+#    terraform apply

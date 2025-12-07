@@ -1,0 +1,85 @@
+```terraform
+# ================================
+# General Configuration
+# ================================
+aws_region   = "us-east-1"
+environment  = "dev"
+project_name = "oficina-mecanica"
+
+# ================================
+# VPC Configuration
+# ================================
+vpc_cidr             = "10.0.0.0/16"
+availability_zones   = ["us-east-1a", "us-east-1b", "us-east-1c"]
+public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+private_subnet_cidrs = ["10.0.11.0/24", "10.0.12.0/24", "10.0.13.0/24"]
+
+# ================================
+# ECR Configuration
+# ================================
+ecr_repository_name = "oficina-service"
+
+# ================================
+# ECS Configuration
+# ================================
+container_name = "oficina-service"
+container_port = 8080
+task_cpu       = "512"   # 0.5 vCPU
+task_memory    = "1024"  # 1 GB
+desired_count  = 2
+
+# Auto Scaling
+autoscaling_min_capacity = 2
+autoscaling_max_capacity = 10
+enable_ecs_exec          = false
+
+# Container Image (deixe vazio para usar ECR)
+container_image = ""
+image_tag       = "latest"
+
+# ================================
+# RDS Configuration
+# ================================
+rds_identifier              = "oficina-db-dev"
+rds_engine_version          = "15.5"
+rds_instance_class          = "db.t3.micro"
+rds_allocated_storage       = 20
+rds_database_name           = "oficina_db"
+rds_master_username         = "postgres"
+rds_master_password         = null  # null = auto-generate
+rds_backup_retention_period = 7
+rds_multi_az                = false
+rds_deletion_protection     = false
+rds_skip_final_snapshot     = true  # ATENÇÃO: true apenas em DEV!
+
+# ================================
+# Application Secrets
+# ================================
+jwt_secret_key       = "your-super-secret-jwt-key-here-change-in-production"
+cors_allowed_origins = "*"
+
+# ================================
+# ALB Configuration
+# ================================
+enable_https        = false
+acm_certificate_arn = ""  # ARN do certificado ACM se enable_https = true
+
+# ================================
+# API Gateway Configuration (Opcional)
+# ================================
+enable_api_gateway   = false
+api_gateway_name     = "oficina-api-dev"
+lambda_function_arn  = ""  # ARN da Lambda de autenticação
+lambda_function_name = ""  # Nome da Lambda de autenticação
+
+# Custom Domain
+enable_custom_domain = false
+custom_domain_name   = ""
+
+# WAF
+enable_waf = false
+
+# Throttling
+api_throttle_burst_limit = 5000
+api_throttle_rate_limit  = 10000
+```

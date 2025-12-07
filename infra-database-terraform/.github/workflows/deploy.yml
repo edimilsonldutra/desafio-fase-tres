@@ -1,0 +1,601 @@
+name: Deploy RDS Infrastructure
+
+on:
+  push:
+    branches:
+      - develop
+      - staging
+      - main
+  pull_request:
+    branches:
+      - develop
+      - staging
+      - main
+
+env:
+  AWS_REGION: us-east-1
+  TERRAFORM_VERSION: 1.6.0
+
+jobs:
+  validate:
+    name: Validate Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init (Dev)
+        working-directory: environments/dev
+        run: terraform init -backend=false
+
+      - name: Terraform Validate (Dev)
+        working-directory: environments/dev
+        run: terraform validate
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: terraform
+          soft_fail: false
+          skip_check: CKV_AWS_118,CKV_AWS_293
+
+      - name: Run TFSec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: .
+          soft_fail: false
+
+  plan-dev:
+    name: Plan Dev Environment
+    runs-on: ubuntu-latest
+    needs: security-scan
+    if: github.ref == 'refs/heads/develop'
+    environment: dev
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Init
+        working-directory: environments/dev
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=rds/dev/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_STATE_LOCK_TABLE }}"
+
+      - name: Terraform Plan
+        working-directory: environments/dev
+        run: |
+          terraform plan \
+            -var="vpc_id=${{ secrets.DEV_VPC_ID }}" \
+            -var="private_subnet_ids=${{ secrets.DEV_PRIVATE_SUBNET_IDS }}" \
+            -out=tfplan
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-dev
+          path: environments/dev/tfplan
+          retention-days: 5
+
+  deploy-dev:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    needs: plan-dev
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    environment: dev
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-dev
+          path: environments/dev
+
+      - name: Terraform Init
+        working-directory: environments/dev
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=rds/dev/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_STATE_LOCK_TABLE }}"
+
+      - name: Terraform Apply
+        working-directory: environments/dev
+        run: terraform apply -auto-approve tfplan
+
+      - name: Get Outputs
+        id: outputs
+        working-directory: environments/dev
+        run: |
+          echo "db_endpoint=$(terraform output -raw db_endpoint)" >> $GITHUB_OUTPUT
+          echo "secret_arn=$(terraform output -raw db_secret_arn)" >> $GITHUB_OUTPUT
+
+      - name: Comment PR with Outputs
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### ✅ Dev Deployment Complete\n\n**Database Endpoint**: \`${{ steps.outputs.outputs.db_endpoint }}\`\n**Secret ARN**: \`${{ steps.outputs.outputs.secret_arn }}\``
+            })
+
+  plan-staging:
+    name: Plan Staging Environment
+    runs-on: ubuntu-latest
+    needs: security-scan
+    if: github.ref == 'refs/heads/staging'
+    environment: staging
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Init
+        working-directory: environments/staging
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=rds/staging/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_STATE_LOCK_TABLE }}"
+
+      - name: Terraform Plan
+        working-directory: environments/staging
+        run: |
+          terraform plan \
+            -var="vpc_id=${{ secrets.STAGING_VPC_ID }}" \
+            -var="private_subnet_ids=${{ secrets.STAGING_PRIVATE_SUBNET_IDS }}" \
+            -out=tfplan
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-staging
+          path: environments/staging/tfplan
+          retention-days: 5
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: plan-staging
+    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
+    environment: staging
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-staging
+          path: environments/staging
+
+      - name: Terraform Init
+        working-directory: environments/staging
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=rds/staging/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_STATE_LOCK_TABLE }}"
+
+      - name: Terraform Apply
+        working-directory: environments/staging
+        run: terraform apply -auto-approve tfplan
+
+      - name: Run Database Migration
+        run: |
+          DB_SECRET=$(aws secretsmanager get-secret-value --secret-id oficina-db-staging --query SecretString --output text)
+          DB_HOST=$(echo $DB_SECRET | jq -r '.host')
+          DB_USER=$(echo $DB_SECRET | jq -r '.username')
+          DB_PASS=$(echo $DB_SECRET | jq -r '.password')
+          
+          PGPASSWORD=$DB_PASS psql -h $DB_HOST -U $DB_USER -d oficina_db -f scripts/init-db.sql
+
+  plan-prod:
+    name: Plan Production Environment
+    runs-on: ubuntu-latest
+    needs: security-scan
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Init
+        working-directory: environments/prod
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=rds/prod/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_STATE_LOCK_TABLE }}"
+
+      - name: Terraform Plan
+        working-directory: environments/prod
+        run: |
+          terraform plan \
+            -var="vpc_id=${{ secrets.PROD_VPC_ID }}" \
+            -var="private_subnet_ids=${{ secrets.PROD_PRIVATE_SUBNET_IDS }}" \
+            -out=tfplan
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-prod
+          path: environments/prod/tfplan
+          retention-days: 30
+
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: plan-prod
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: 
+      name: production
+      url: https://console.aws.amazon.com/rds/home?region=us-east-1#database:id=oficina-db-prod
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create Pre-Deployment Snapshot
+        id: snapshot
+        run: |
+          DB_INSTANCE_ID="oficina-db-prod"
+          SNAPSHOT_ID="oficina-db-prod-pre-deploy-$(date +%Y%m%d-%H%M%S)"
+          
+          aws rds create-db-snapshot \
+            --db-instance-identifier $DB_INSTANCE_ID \
+            --db-snapshot-identifier $SNAPSHOT_ID \
+            --tags Key=Deployment,Value=github-actions Key=Commit,Value=${{ github.sha }} Key=AutoRollback,Value=true
+          
+          echo "snapshot_id=$SNAPSHOT_ID" >> $GITHUB_OUTPUT
+          echo "✅ Snapshot created: $SNAPSHOT_ID"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-prod
+          path: environments/prod
+
+      - name: Terraform Init
+        working-directory: environments/prod
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=rds/prod/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_STATE_LOCK_TABLE }}"
+
+      - name: Terraform Apply
+        working-directory: environments/prod
+        run: terraform apply -auto-approve tfplan
+
+      - name: Verify Database Health
+        id: health-check
+        run: |
+          DB_INSTANCE_ID="oficina-db-prod"
+          
+          echo "Waiting for database to be available..."
+          aws rds wait db-instance-available --db-instance-identifier $DB_INSTANCE_ID
+          
+          STATUS=$(aws rds describe-db-instances \
+            --db-instance-identifier $DB_INSTANCE_ID \
+            --query 'DBInstances[0].DBInstanceStatus' \
+            --output text)
+          
+          if [ "$STATUS" != "available" ]; then
+            echo "❌ Database is not available: $STATUS"
+            echo "health_check_passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "✅ Database is healthy and available"
+          echo "health_check_passed=true" >> $GITHUB_OUTPUT
+
+      - name: Monitor CloudWatch Metrics
+        run: |
+          DB_INSTANCE_ID="oficina-db-prod"
+          
+          # CPU Utilization
+          CPU_UTIL=$(aws cloudwatch get-metric-statistics \
+            --namespace AWS/RDS \
+            --metric-name CPUUtilization \
+            --dimensions Name=DBInstanceIdentifier,Value=$DB_INSTANCE_ID \
+            --start-time $(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+            --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+            --period 300 \
+            --statistics Average \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Datapoints[0].Average' \
+            --output text)
+          
+          echo "CPU Utilization: ${CPU_UTIL:-N/A}%"
+          
+          # Database Connections
+          DB_CONNECTIONS=$(aws cloudwatch get-metric-statistics \
+            --namespace AWS/RDS \
+            --metric-name DatabaseConnections \
+            --dimensions Name=DBInstanceIdentifier,Value=$DB_INSTANCE_ID \
+            --start-time $(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+            --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+            --period 300 \
+            --statistics Average \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Datapoints[0].Average' \
+            --output text)
+          
+          echo "Database Connections: ${DB_CONNECTIONS:-N/A}"
+          
+          # Free Storage Space
+          FREE_STORAGE=$(aws cloudwatch get-metric-statistics \
+            --namespace AWS/RDS \
+            --metric-name FreeStorageSpace \
+            --dimensions Name=DBInstanceIdentifier,Value=$DB_INSTANCE_ID \
+            --start-time $(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+            --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+            --period 300 \
+            --statistics Average \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Datapoints[0].Average' \
+            --output text)
+          
+          echo "Free Storage Space: ${FREE_STORAGE:-N/A} bytes"
+
+      - name: Notify Slack - Success
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "🎉 RDS Production Deploy SUCCESS",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Deploy Status*: ✅ Success\n*Environment*: Production\n*Database*: oficina-db-prod\n*Snapshot*: ${{ steps.snapshot.outputs.snapshot_id }}\n*Commit*: ${{ github.sha }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Notify Deployment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ job.status }}' === 'success' ? '✅ Success' : '❌ Failed';
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: '${{ job.status }}' === 'success' ? 'success' : 'failure',
+              context: 'Production RDS Deployment',
+              description: status
+            });
+
+  # ============================================
+  # Rollback RDS on Failure
+  # ============================================
+  rollback-prod:
+    name: Rollback Production RDS
+    runs-on: ubuntu-latest
+    needs: [deploy-prod]
+    if: failure()
+    environment:
+      name: production
+    
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Find Latest Snapshot
+        id: find-snapshot
+        run: |
+          DB_INSTANCE_ID="oficina-db-prod"
+          
+          # Find the most recent snapshot with AutoRollback tag
+          SNAPSHOT_ID=$(aws rds describe-db-snapshots \
+            --db-instance-identifier $DB_INSTANCE_ID \
+            --snapshot-type manual \
+            --query 'sort_by(DBSnapshots[?contains(Tags[?Key==`AutoRollback`].Value, `true`)], &SnapshotCreateTime)[-1].DBSnapshotIdentifier' \
+            --output text)
+          
+          if [ -z "$SNAPSHOT_ID" ] || [ "$SNAPSHOT_ID" == "None" ]; then
+            echo "❌ No rollback snapshot found!"
+            exit 1
+          fi
+          
+          echo "Found snapshot for rollback: $SNAPSHOT_ID"
+          echo "snapshot_id=$SNAPSHOT_ID" >> $GITHUB_OUTPUT
+      
+      - name: Delete Current Database
+        run: |
+          DB_INSTANCE_ID="oficina-db-prod"
+          
+          echo "⚠️ Deleting current database instance..."
+          
+          aws rds delete-db-instance \
+            --db-instance-identifier $DB_INSTANCE_ID \
+            --skip-final-snapshot \
+            --delete-automated-backups
+          
+          echo "Waiting for deletion to complete..."
+          aws rds wait db-instance-deleted --db-instance-identifier $DB_INSTANCE_ID
+          
+          echo "✅ Database instance deleted"
+      
+      - name: Restore from Snapshot
+        run: |
+          DB_INSTANCE_ID="oficina-db-prod"
+          SNAPSHOT_ID="${{ steps.find-snapshot.outputs.snapshot_id }}"
+          
+          echo "🔄 Restoring database from snapshot: $SNAPSHOT_ID"
+          
+          # Get original DB configuration
+          DB_INSTANCE_CLASS=$(aws rds describe-db-snapshots \
+            --db-snapshot-identifier $SNAPSHOT_ID \
+            --query 'DBSnapshots[0].InstanceCreateTime' \
+            --output text)
+          
+          # Restore from snapshot
+          aws rds restore-db-instance-from-db-snapshot \
+            --db-instance-identifier $DB_INSTANCE_ID \
+            --db-snapshot-identifier $SNAPSHOT_ID \
+            --db-instance-class db.t3.medium \
+            --multi-az \
+            --publicly-accessible false \
+            --tags Key=Restored,Value=true Key=RestoredAt,Value=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          
+          echo "Waiting for database to be available..."
+          aws rds wait db-instance-available --db-instance-identifier $DB_INSTANCE_ID
+          
+          echo "✅ Database restored successfully"
+      
+      - name: Verify Restored Database
+        run: |
+          DB_INSTANCE_ID="oficina-db-prod"
+          
+          STATUS=$(aws rds describe-db-instances \
+            --db-instance-identifier $DB_INSTANCE_ID \
+            --query 'DBInstances[0].DBInstanceStatus' \
+            --output text)
+          
+          ENDPOINT=$(aws rds describe-db-instances \
+            --db-instance-identifier $DB_INSTANCE_ID \
+            --query 'DBInstances[0].Endpoint.Address' \
+            --output text)
+          
+          echo "Database Status: $STATUS"
+          echo "Database Endpoint: $ENDPOINT"
+          
+          if [ "$STATUS" != "available" ]; then
+            echo "❌ Restored database is not healthy"
+            exit 1
+          fi
+          
+          echo "✅ Restored database is healthy and available"
+      
+      - name: Notify Slack - Rollback
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "🔄 RDS Production ROLLBACK EXECUTED",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Action*: ⚠️ Automatic Rollback\n*Environment*: Production\n*Database*: oficina-db-prod\n*Restored From*: ${{ steps.find-snapshot.outputs.snapshot_id }}\n*Reason*: Deployment failed\n*Status*: Database restored to previous state"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

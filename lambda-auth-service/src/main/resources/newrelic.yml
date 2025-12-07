@@ -1,0 +1,133 @@
+# New Relic Java Agent Configuration
+# Documentation: https://docs.newrelic.com/docs/apm/agents/java-agent/configuration/java-agent-configuration-config-file/
+
+common: &default_settings
+  # Application name
+  app_name: ValidaPessoa Lambda
+
+  # License key (will be overridden by environment variable)
+  license_key: '<%= ENV["NEW_RELIC_LICENSE_KEY"] %>'
+
+  # Agent enabled
+  agent_enabled: true
+
+  # High security mode
+  high_security: false
+
+  # Enable all transaction tracer settings
+  transaction_tracer:
+    enabled: true
+    transaction_threshold: apdex_f
+    record_sql: obfuscated
+    stack_trace_threshold: 0.5
+    explain_enabled: true
+    explain_threshold: 0.5
+    log_sql: false
+
+  # Error collector settings
+  error_collector:
+    enabled: true
+    ignore_errors: ''
+    ignore_status_codes: 404
+    expected_status_codes: 400-499
+
+  # Distributed tracing
+  distributed_tracing:
+    enabled: true
+
+  # Thread profiler
+  thread_profiler:
+    enabled: true
+
+  # Browser monitoring
+  browser_monitoring:
+    auto_instrument: false
+
+  # Custom instrumentation
+  instrumentation:
+    # Instrument AWS SDK calls
+    aws-java-sdk-2.2:
+      enabled: true
+    # Instrument HTTP clients
+    httpclient:
+      enabled: true
+    # Instrument database calls
+    jdbc:
+      enabled: true
+
+  # Labels for the application
+  labels:
+    Environment: production
+    Team: Platform
+    Service: Authentication
+
+  # Application logging
+  application_logging:
+    enabled: true
+    forwarding:
+      enabled: true
+      max_samples_stored: 10000
+    metrics:
+      enabled: true
+    local_decorating:
+      enabled: true
+
+  # Attributes
+  attributes:
+    enabled: true
+    include:
+      - request.parameters.*
+      - request.headers.correlationId
+      - request.headers.requestId
+    exclude:
+      - request.headers.authorization
+      - request.parameters.password
+      - request.parameters.cpf
+
+  # Span events
+  span_events:
+    enabled: true
+    attributes:
+      enabled: true
+
+  # Transaction events
+  transaction_events:
+    enabled: true
+    max_samples_stored: 2000
+
+  # Custom events
+  custom_events:
+    enabled: true
+    max_samples_stored: 10000
+
+  # Metrics
+  metrics:
+    enabled: true
+
+  # Audit mode (for debugging)
+  audit_mode: false
+
+  # Log settings
+  log_level: info
+  log_file_name: STDOUT
+  log_limit_in_kbytes: 0
+  log_file_count: 1
+
+  # AWS Lambda specific settings
+  serverless_mode:
+    enabled: true
+
+# Environment specific settings
+development:
+  <<: *default_settings
+  app_name: ValidaPessoa Lambda (Development)
+  log_level: debug
+
+staging:
+  <<: *default_settings
+  app_name: ValidaPessoa Lambda (Staging)
+
+production:
+  <<: *default_settings
+  app_name: ValidaPessoa Lambda (Production)
+

@@ -1,0 +1,178 @@
+# ============================================================
+# DOCKER COMPOSE UNIFICADO - Tech Challenge Fase 2
+# ============================================================
+#
+# USO:
+#   Básico (app + postgres):
+#     docker-compose up -d
+#
+#   Com monitoring (Grafana + InfluxDB):
+#     docker-compose --profile monitoring up -d
+#
+#   Com testes K6:
+#     docker-compose --profile testing up -d
+#
+#   Completo (tudo):
+#     docker-compose --profile monitoring --profile testing up -d
+# ============================================================
+
+services:
+  # ============================================================
+  # APLICAÇÃO - Sempre disponível
+  # ============================================================
+  app:
+    build: .
+    container_name: oficina-app
+    ports:
+      - "8080:8080"
+      # - "5005:5005" # Porta de debug (descomente para desenvolvimento)
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=oficinadb
+      - DB_USER=user
+      - DB_PASS=password
+      - JWT_SECRET=${JWT_SECRET:-default-secret-change-in-production}
+      - MAIL_HOST=${MAIL_HOST:-smtp.example.com}
+      - MAIL_PORT=${MAIL_PORT:-587}
+      - MAIL_USER=${MAIL_USER:-seu-email@example.com}
+      - MAIL_PASS=${MAIL_PASS:-sua-senha}
+      - SECURITY_DISABLED=${SECURITY_DISABLED:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - oficina-net
+      - monitoring
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+
+  # ============================================================
+  # BANCO DE DADOS - Sempre disponível
+  # ============================================================
+  postgres:
+    image: postgres:14-alpine
+    container_name: oficina-db
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=oficinadb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - oficina-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d oficinadb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================
+  # MONITORING - Profile: monitoring
+  # ============================================================
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: k6-influxdb
+    profiles: ["monitoring"]
+    ports:
+      - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=admin123456
+      - DOCKER_INFLUXDB_INIT_ORG=tech-fiap
+      - DOCKER_INFLUXDB_INIT_BUCKET=k6
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=k6-token-super-secret-tech-fiap-2025
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
+    networks:
+      - monitoring
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: k6-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./k6/grafana/provisioning:/etc/grafana/provisioning
+      - ./k6/grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    networks:
+      - monitoring
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================
+  # TESTES K6 - Profile: testing
+  # ============================================================
+  k6:
+    image: grafana/k6:latest
+    container_name: k6-runner
+    profiles: ["testing"]
+    environment:
+      - K6_INFLUXDB_ORGANIZATION=tech-fiap
+      - K6_INFLUXDB_BUCKET=k6
+      - K6_INFLUXDB_TOKEN=k6-token-super-secret-tech-fiap-2025
+      - BASE_URL=http://app:8080
+    volumes:
+      - ./k6/load-tests:/scripts
+      - ./k6/reports:/reports
+    networks:
+      - oficina-net
+      - monitoring
+    depends_on:
+      app:
+        condition: service_healthy
+    command: run --out influxdb=http://influxdb:8086 /scripts/smoke-test.js
+
+# ============================================================
+# VOLUMES
+# ============================================================
+volumes:
+  postgres_data:
+    driver: local
+  influxdb_data:
+    driver: local
+  influxdb_config:
+    driver: local
+  grafana_data:
+    driver: local
+
+# ============================================================
+# NETWORKS
+# ============================================================
+networks:
+  oficina-net:
+    driver: bridge
+  monitoring:
+    driver: bridge

@@ -1,0 +1,223 @@
+# Configuração de Alertas do New Relic
+# Este arquivo contém as políticas de alertas em formato NRQL para configuração no New Relic
+
+---
+# Política: Latência das APIs
+name: "Oficina Service - Latência Elevada"
+description: "Alerta quando a latência das APIs ultrapassa limites aceitáveis"
+incident_preference: PER_POLICY
+
+conditions:
+  - name: "Latência P95 acima de 1 segundo"
+    type: NRQL
+    nrql:
+      query: "SELECT percentile(duration, 95) FROM Transaction WHERE appName = 'oficina-service' FACET name"
+    critical:
+      operator: ABOVE
+      threshold: 1.0
+      threshold_duration: 300  # 5 minutos
+      threshold_occurrences: ALL
+    warning:
+      operator: ABOVE
+      threshold: 0.5
+      threshold_duration: 300
+      threshold_occurrences: ALL
+
+  - name: "Latência Média acima de 500ms"
+    type: NRQL
+    nrql:
+      query: "SELECT average(duration) FROM Transaction WHERE appName = 'oficina-service'"
+    critical:
+      operator: ABOVE
+      threshold: 0.5
+      threshold_duration: 300
+      threshold_occurrences: ALL
+
+---
+# Política: Consumo de Recursos Kubernetes
+name: "Oficina Service - Consumo de Recursos"
+description: "Monitora CPU e memória dos pods no Kubernetes"
+
+conditions:
+  - name: "CPU acima de 80%"
+    type: NRQL
+    nrql:
+      query: "SELECT max(cpuUsedCores/cpuLimitCores*100) FROM K8sContainerSample WHERE containerName = 'oficina-service' FACET podName"
+    critical:
+      operator: ABOVE
+      threshold: 80
+      threshold_duration: 300
+      threshold_occurrences: ALL
+    warning:
+      operator: ABOVE
+      threshold: 70
+      threshold_duration: 300
+      threshold_occurrences: ALL
+
+  - name: "Memória acima de 85%"
+    type: NRQL
+    nrql:
+      query: "SELECT max(memoryUsedBytes/memoryLimitBytes*100) FROM K8sContainerSample WHERE containerName = 'oficina-service' FACET podName"
+    critical:
+      operator: ABOVE
+      threshold: 85
+      threshold_duration: 300
+      threshold_occurrences: ALL
+    warning:
+      operator: ABOVE
+      threshold: 75
+      threshold_duration: 300
+      threshold_occurrences: ALL
+
+  - name: "Pod Restarts Frequentes"
+    type: NRQL
+    nrql:
+      query: "SELECT max(restartCount) FROM K8sContainerSample WHERE containerName = 'oficina-service' FACET podName"
+    critical:
+      operator: ABOVE
+      threshold: 3
+      threshold_duration: 600  # 10 minutos
+      threshold_occurrences: AT_LEAST_ONCE
+
+---
+# Política: Health Checks e Uptime
+name: "Oficina Service - Health e Disponibilidade"
+description: "Monitora health checks e uptime da aplicação"
+
+conditions:
+  - name: "Taxa de Erro HTTP acima de 5%"
+    type: NRQL
+    nrql:
+      query: "SELECT percentage(count(*), WHERE httpResponseCode >= 500) FROM Transaction WHERE appName = 'oficina-service'"
+    critical:
+      operator: ABOVE
+      threshold: 5
+      threshold_duration: 300
+      threshold_occurrences: ALL
+    warning:
+      operator: ABOVE
+      threshold: 2
+      threshold_duration: 300
+      threshold_occurrences: ALL
+
+  - name: "Health Check Failure"
+    type: NRQL
+    nrql:
+      query: "SELECT count(*) FROM Transaction WHERE appName = 'oficina-service' AND name LIKE '%/actuator/health%' AND httpResponseCode != 200"
+    critical:
+      operator: ABOVE
+      threshold: 3
+      threshold_duration: 300
+      threshold_occurrences: AT_LEAST_ONCE
+
+  - name: "Aplicação Offline"
+    type: NRQL
+    nrql:
+      query: "SELECT count(*) FROM Transaction WHERE appName = 'oficina-service'"
+    critical:
+      operator: EQUAL
+      threshold: 0
+      threshold_duration: 180  # 3 minutos
+      threshold_occurrences: ALL
+
+---
+# Política: Processamento de Ordens de Serviço
+name: "Oficina Service - Falhas em Ordens de Serviço"
+description: "Alertas para falhas no processamento de ordens de serviço"
+
+conditions:
+  - name: "Falhas na Criação de Ordens de Serviço"
+    type: NRQL
+    nrql:
+      query: "SELECT count(*) FROM Metric WHERE metricName = 'oficina.ordem_servico.erros.criacao'"
+    critical:
+      operator: ABOVE
+      threshold: 5
+      threshold_duration: 300
+      threshold_occurrences: ALL
+    warning:
+      operator: ABOVE
+      threshold: 2
+      threshold_duration: 300
+      threshold_occurrences: ALL
+
+  - name: "Falhas na Atualização de Status"
+    type: NRQL
+    nrql:
+      query: "SELECT count(*) FROM Metric WHERE metricName = 'oficina.ordem_servico.erros.atualizacao'"
+    critical:
+      operator: ABOVE
+      threshold: 5
+      threshold_duration: 300
+      threshold_occurrences: ALL
+
+  - name: "Falhas em Integrações Externas"
+    type: NRQL
+    nrql:
+      query: "SELECT count(*) FROM Metric WHERE metricName = 'oficina.ordem_servico.erros.integracao'"
+    critical:
+      operator: ABOVE
+      threshold: 3
+      threshold_duration: 300
+      threshold_occurrences: ALL
+
+  - name: "Taxa de Sucesso de Ordens de Serviço abaixo de 95%"
+    type: NRQL
+    nrql:
+      query: "SELECT (sum(oficina.ordem_servico.criadas.total) - sum(oficina.ordem_servico.erros.criacao)) / sum(oficina.ordem_servico.criadas.total) * 100 FROM Metric"
+    critical:
+      operator: BELOW
+      threshold: 95
+      threshold_duration: 600
+      threshold_occurrences: ALL
+    warning:
+      operator: BELOW
+      threshold: 98
+      threshold_duration: 600
+      threshold_occurrences: ALL
+
+---
+# Política: Database Performance
+name: "Oficina Service - Performance de Banco de Dados"
+description: "Monitora performance e conectividade do banco de dados"
+
+conditions:
+  - name: "Slow Queries (> 1 segundo)"
+    type: NRQL
+    nrql:
+      query: "SELECT count(*) FROM Transaction WHERE databaseDuration > 1 AND appName = 'oficina-service'"
+    warning:
+      operator: ABOVE
+      threshold: 10
+      threshold_duration: 300
+      threshold_occurrences: ALL
+
+  - name: "Database Connection Pool Esgotado"
+    type: NRQL
+    nrql:
+      query: "SELECT count(*) FROM TransactionError WHERE appName = 'oficina-service' AND error.message LIKE '%connection%pool%'"
+    critical:
+      operator: ABOVE
+      threshold: 1
+      threshold_duration: 180
+      threshold_occurrences: AT_LEAST_ONCE
+
+---
+# Canais de Notificação
+notification_channels:
+  - name: "Email - Equipe DevOps"
+    type: EMAIL
+    configuration:
+      recipients: "devops@grupo99.com.br"
+      include_json_attachment: true
+
+  - name: "Slack - Alertas Críticos"
+    type: SLACK
+    configuration:
+      url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+      channel: "#oficina-alerts"
+
+  - name: "PagerDuty - Produção"
+    type: PAGERDUTY
+    configuration:
+      service_key: "YOUR_PAGERDUTY_SERVICE_KEY"

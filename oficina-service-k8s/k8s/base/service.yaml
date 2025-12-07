@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oficina-service
+  namespace: oficina
+spec:
+  selector:
+    app: oficina
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: NodePort
+  # Para ambiente local, use NodePort em vez de LoadBalancer
+  # O LoadBalancer só funciona em provedores de nuvem

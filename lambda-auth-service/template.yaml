@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  lambda-auth-service
+
+  Lambda Function para autenticação e autorização de clientes via AWS API Gateway
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Environment:
+      Variables:
+        JWT_SECRET: "my-secret-key-for-jwt-token-generation-must-be-at-least-256-bits-long"
+        DB_HOST: !Sub "{{resolve:secretsmanager:rds/credentials:SecretString:host}}"
+        DB_PORT: "5432"
+        DB_NAME: "oficina_db"
+        DB_USER: !Sub "{{resolve:secretsmanager:rds/credentials:SecretString:username}}"
+        DB_PASSWORD: !Sub "{{resolve:secretsmanager:rds/credentials:SecretString:password}}"
+
+Resources:
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Architectures:
+        - x86_64
+      Events:
+        AuthPost:
+          Type: Api
+          Properties:
+            Path: /auth
+            Method: post
+            RestApiId: !Ref ApiGateway
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:rds/credentials-*"
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+    Metadata:
+      DockerTag: java21-maven-v1
+      DockerContext: .
+      Dockerfile: Dockerfile
+
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Cors:
+        AllowMethods: "'POST, GET, OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+      Auth:
+        ApiKeyRequired: false
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: "Auth API"
+          version: "1.0"
+        paths:
+          /auth:
+            post:
+              summary: "Autentica cliente e retorna JWT"
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        cpf:
+                          type: string
+                          example: "11144477735"
+              responses:
+                "200":
+                  description: "Token JWT gerado com sucesso"
+                  content:
+                    application/json:
+                      schema:
+                        type: object
+                        properties:
+                          token:
+                            type: string
+                          customer:
+                            type: object
+                            properties:
+                              id:
+                                type: string
+                              cpf:
+                                type: string
+                              name:
+                                type: string
+                              email:
+                                type: string
+                              role:
+                                type: string
+                "400":
+                  description: "CPF inválido"
+                "404":
+                  description: "Cliente não encontrado"
+                "403":
+                  description: "Cliente inativo"
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthFunction.Arn}/invocations"
+
+  # VPC Resources (assumindo que você já tem uma VPC configurada)
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Security group for Lambda Auth Function"
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          DestinationSecurityGroupId: !Ref RDSSecurityGroup
+
+  # Placeholder - substituir pelos IDs reais da sua VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: "10.0.0.0/16"
+      
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.0.1.0/24"
+      AvailabilityZone: !Select [0, !GetAZs '']
+      
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.0.2.0/24"
+      AvailabilityZone: !Select [1, !GetAZs '']
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Security group for RDS"
+      VpcId: !Ref VPC
+
+Outputs:
+  AuthApiUrl:
+    Description: "URL do API Gateway para autenticação"
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.${AWS::URLSuffix}/prod/auth"
+    Export:
+      Name: !Sub "${AWS::StackName}-AuthApiUrl"
+      
+  AuthFunctionArn:
+    Description: "ARN da função Lambda de autenticação"
+    Value: !GetAtt AuthFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-AuthFunctionArn"
+      
+  ApiGatewayId:
+    Description: "ID do API Gateway"
+    Value: !Ref ApiGateway
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiGatewayId"

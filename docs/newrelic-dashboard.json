@@ -1,0 +1,497 @@
+{
+  "name": "Oficina Service - Overview Dashboard",
+  "description": "Dashboard principal com visão geral do sistema Oficina Service",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Overview",
+      "description": "Visão geral de performance e saúde da aplicação",
+      "widgets": [
+        {
+          "title": "Throughput - Requisições por Minuto",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(count(*), 1 minute) FROM Transaction WHERE appName = 'oficina-service' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Latência - P50, P95, P99",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT percentile(duration, 50, 95, 99) FROM Transaction WHERE appName = 'oficina-service' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Taxa de Erro",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT percentage(count(*), WHERE error IS true) FROM Transaction WHERE appName = 'oficina-service'"
+              }
+            ],
+            "thresholds": [
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 5
+              },
+              {
+                "alertSeverity": "WARNING",
+                "value": 2
+              }
+            ]
+          }
+        },
+        {
+          "title": "CPU Usage - Por Pod",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(cpuUsedCores/cpuLimitCores*100) FROM K8sContainerSample WHERE containerName = 'oficina-service' FACET podName TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Memória Usage - Por Pod",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(memoryUsedBytes/memoryLimitBytes*100) FROM K8sContainerSample WHERE containerName = 'oficina-service' FACET podName TIMESERIES AUTO"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ordens de Serviço",
+      "description": "Métricas específicas de Ordens de Serviço",
+      "widgets": [
+        {
+          "title": "Volume Diário de Ordens de Serviço",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(oficina.ordem_servico.criadas.total) FROM Metric FACET dateOf(timestamp) SINCE 7 days ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Ordens de Serviço Criadas (Hoje)",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 3,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(oficina.ordem_servico.criadas.total) FROM Metric SINCE today"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Ordens Concluídas (Hoje)",
+          "layout": {
+            "column": 10,
+            "row": 1,
+            "width": 3,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(oficina.ordem_servico.concluidas.total) FROM Metric SINCE today"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Distribuição por Status - Atual",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(oficina.ordem_servico.status.diagnostico.quantidade) AS 'Diagnóstico', latest(oficina.ordem_servico.status.execucao.quantidade) AS 'Execução', latest(oficina.ordem_servico.status.finalizacao.quantidade) AS 'Finalização', latest(oficina.ordem_servico.status.concluida.quantidade) AS 'Concluída' FROM Metric"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Tempo Médio por Status (Últimas 24h)",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(oficina.ordem_servico.status.diagnostico.tempo) AS 'Diagnóstico (ms)', average(oficina.ordem_servico.status.execucao.tempo) AS 'Execução (ms)', average(oficina.ordem_servico.status.finalizacao.tempo) AS 'Finalização (ms)' FROM Metric SINCE 24 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Taxa de Sucesso de Criação",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT (sum(oficina.ordem_servico.criadas.total) - sum(oficina.ordem_servico.erros.criacao)) / sum(oficina.ordem_servico.criadas.total) * 100 AS 'Taxa de Sucesso (%)' FROM Metric SINCE 1 hour ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 95
+              },
+              {
+                "alertSeverity": "WARNING",
+                "value": 98
+              }
+            ]
+          }
+        },
+        {
+          "title": "Tempo Médio de Criação",
+          "layout": {
+            "column": 5,
+            "row": 7,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(oficina.ordem_servico.criacao.tempo) FROM Metric TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Erros na Criação de OS",
+          "layout": {
+            "column": 9,
+            "row": 7,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(oficina.ordem_servico.erros.criacao) FROM Metric TIMESERIES AUTO"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Integrações e Erros",
+      "description": "Monitoramento de integrações externas e erros",
+      "widgets": [
+        {
+          "title": "Status de Integrações Externas",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) AS 'Total', percentage(count(*), WHERE httpResponseCode < 400) AS 'Taxa de Sucesso (%)' FROM Transaction WHERE appName = 'oficina-service' AND name LIKE '%integration%' FACET name SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Latência de Integrações",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(duration) FROM Transaction WHERE appName = 'oficina-service' AND name LIKE '%integration%' FACET name TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Erros de Integração por Tipo",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) FROM TransactionError WHERE appName = 'oficina-service' FACET error.class SINCE 24 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Top 10 Erros Recentes",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) AS 'Ocorrências', latest(error.message) AS 'Mensagem' FROM TransactionError WHERE appName = 'oficina-service' FACET error.class SINCE 1 hour ago LIMIT 10"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Timeline de Erros",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) FROM TransactionError WHERE appName = 'oficina-service' FACET error.class TIMESERIES AUTO LIMIT 5"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Database Performance",
+      "description": "Performance e queries do banco de dados",
+      "widgets": [
+        {
+          "title": "Database Query Time",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(databaseDuration), percentile(databaseDuration, 95, 99) FROM Transaction WHERE appName = 'oficina-service' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Slow Queries (> 1s)",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*), average(databaseDuration) AS 'Avg Duration' FROM Transaction WHERE appName = 'oficina-service' AND databaseDuration > 1 FACET name SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Database Calls por Transação",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(databaseCallCount) FROM Transaction WHERE appName = 'oficina-service' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Connection Pool Status",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) AS 'Connection Errors' FROM TransactionError WHERE appName = 'oficina-service' AND error.message LIKE '%connection%' SINCE 1 hour ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 1
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

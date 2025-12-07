@@ -1,0 +1,47 @@
+#
+# New Relic Java Agent Configuration - API Aprovação Orçamento
+#
+
+common: &default_settings
+  license_key: '${NEW_RELIC_LICENSE_KEY}'
+  agent_enabled: true
+  app_name: API Aprovacao Orcamento - ${NEW_RELIC_ENVIRONMENT:dev}
+
+  distributed_tracing:
+    enabled: true
+
+  thread_profiler:
+    enabled: true
+
+  transaction_tracer:
+    enabled: true
+    transaction_threshold: apdex_f
+    record_sql: obfuscated
+    
+  error_collector:
+    enabled: true
+    ignore_status_codes: 404
+
+  application_logging:
+    enabled: true
+    forwarding:
+      enabled: true
+      max_samples_stored: 10000
+    local_decorating:
+      enabled: true
+    metrics:
+      enabled: true
+
+  labels:
+    Environment: ${NEW_RELIC_ENVIRONMENT:dev}
+    Service: api-aprovacao-orcamento
+    Team: Grupo99
+
+development:
+  <<: *default_settings
+  app_name: API Aprovacao Orcamento - Development
+
+production:
+  <<: *default_settings
+  app_name: API Aprovacao Orcamento - Production
+  log_level: info

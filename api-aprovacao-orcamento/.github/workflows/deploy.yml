@@ -1,0 +1,441 @@
+name: Deploy API Aprovação Orçamento
+
+on:
+  push:
+    branches:
+      - develop    # Auto-deploy to DEV
+      - staging    # Auto-deploy to STAGING  
+      - main       # Deploy to PROD (requires approval)
+  pull_request:
+    branches:
+      - develop
+      - staging
+      - main
+
+env:
+  AWS_REGION: us-east-1
+  JAVA_VERSION: '17'
+  ECR_REPOSITORY: fiap-oficina-api-aprovacao
+
+jobs:
+  # ============================================
+  # Job 1: Build and Test
+  # ============================================
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'corretto'
+          cache: 'maven'
+      
+      - name: Cache Maven dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+      
+      - name: Run tests
+        run: mvn clean test
+        working-directory: .
+      
+      - name: Generate test coverage report
+        run: mvn jacoco:report
+        working-directory: .
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./target/site/jacoco/jacoco.xml
+          fail_ci_if_error: false
+      
+      - name: Build JAR
+        run: mvn package -DskipTests
+        working-directory: .
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-aprovacao-jar
+          path: target/*.jar
+          retention-days: 7
+
+  # ============================================
+  # Job 2: Security Scan
+  # ============================================
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'api-aprovacao-orcamento'
+          path: '.'
+          format: 'HTML'
+      
+      - name: Upload OWASP report
+        uses: actions/upload-artifact@v3
+        with:
+          name: owasp-report
+          path: reports/
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ============================================
+  # Job 3: Build and Push Docker Image
+  # ============================================
+  docker-build-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: [build, security-scan]
+    if: github.event_name == 'push'
+    
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build-push.outputs.digest }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: api-aprovacao-jar
+          path: target/
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build and push Docker image
+        id: build-push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.meta.outputs.version }}
+      
+      - name: Scan Docker image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'docker-trivy-results.sarif'
+      
+      - name: Upload Docker Trivy results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'docker-trivy-results.sarif'
+
+  # ============================================
+  # Job 4: Deploy to DEV
+  # ============================================
+  deploy-dev:
+    name: Deploy to DEV
+    runs-on: ubuntu-latest
+    needs: docker-build-push
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    environment:
+      name: development
+      url: https://api-dev.oficina.com/api/v1/notificacoes-aprovacao
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Terraform Init
+        working-directory: infra/terraform/environments/dev
+        run: terraform init
+      
+      - name: Terraform Plan
+        working-directory: infra/terraform/environments/dev
+        env:
+          TF_VAR_image_name: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+        run: terraform plan -out=tfplan
+      
+      - name: Terraform Apply
+        working-directory: infra/terraform/environments/dev
+        env:
+          TF_VAR_image_name: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+        run: terraform apply -auto-approve tfplan
+      
+      - name: Get EKS cluster info
+        id: eks-info
+        run: |
+          CLUSTER_NAME=$(terraform -chdir=infra/terraform/environments/dev output -raw eks_cluster_name)
+          echo "cluster_name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
+      
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ steps.eks-info.outputs.cluster_name }} \
+            --region ${{ env.AWS_REGION }}
+      
+      - name: Wait for deployment rollout
+        run: |
+          kubectl rollout status deployment/api-aprovacao-orcamento \
+            -n api-aprovacao-dev \
+            --timeout=5m
+      
+      - name: Run smoke tests
+        run: |
+          SERVICE_URL=$(kubectl get svc api-aprovacao-orcamento \
+            -n api-aprovacao-dev \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          
+          if [ -z "$SERVICE_URL" ]; then
+            SERVICE_URL="api-aprovacao-orcamento.api-aprovacao-dev.svc.cluster.local"
+          fi
+          
+          echo "Testing endpoint: $SERVICE_URL/actuator/health"
+          
+          # Port-forward for testing
+          kubectl port-forward svc/api-aprovacao-orcamento 8081:80 -n api-aprovacao-dev &
+          PF_PID=$!
+          sleep 5
+          
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/actuator/health)
+          
+          kill $PF_PID
+          
+          if [ "$RESPONSE" -ne 200 ]; then
+            echo "Smoke test failed with status: $RESPONSE"
+            exit 1
+          fi
+          
+          echo "Smoke test passed!"
+
+  # ============================================
+  # Job 5: Deploy to STAGING
+  # ============================================
+  deploy-staging:
+    name: Deploy to STAGING
+    runs-on: ubuntu-latest
+    needs: docker-build-push
+    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
+    environment:
+      name: staging
+      url: https://api-staging.oficina.com/api/v1/notificacoes-aprovacao
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Terraform Init
+        working-directory: infra/terraform/environments/staging
+        run: terraform init
+      
+      - name: Terraform Plan
+        working-directory: infra/terraform/environments/staging
+        env:
+          TF_VAR_image_name: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+        run: terraform plan -out=tfplan
+      
+      - name: Terraform Apply
+        working-directory: infra/terraform/environments/staging
+        env:
+          TF_VAR_image_name: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+        run: terraform apply -auto-approve tfplan
+      
+      - name: Get EKS cluster info
+        id: eks-info
+        run: |
+          CLUSTER_NAME=$(terraform -chdir=infra/terraform/environments/staging output -raw eks_cluster_name)
+          echo "cluster_name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
+      
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ steps.eks-info.outputs.cluster_name }} \
+            --region ${{ env.AWS_REGION }}
+      
+      - name: Wait for deployment rollout
+        run: |
+          kubectl rollout status deployment/api-aprovacao-orcamento \
+            -n api-aprovacao-staging \
+            --timeout=5m
+
+  # ============================================
+  # Job 6: Deploy to PROD
+  # ============================================
+  deploy-prod:
+    name: Deploy to PROD
+    runs-on: ubuntu-latest
+    needs: docker-build-push
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: https://api.oficina.com/api/v1/notificacoes-aprovacao
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Terraform Init
+        working-directory: infra/terraform/environments/prod
+        run: terraform init
+      
+      - name: Terraform Plan
+        working-directory: infra/terraform/environments/prod
+        env:
+          TF_VAR_image_name: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+        run: terraform plan -out=tfplan
+      
+      - name: Terraform Apply
+        working-directory: infra/terraform/environments/prod
+        env:
+          TF_VAR_image_name: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+        run: terraform apply -auto-approve tfplan
+      
+      - name: Get EKS cluster info
+        id: eks-info
+        run: |
+          CLUSTER_NAME=$(terraform -chdir=infra/terraform/environments/prod output -raw eks_cluster_name)
+          echo "cluster_name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
+      
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ steps.eks-info.outputs.cluster_name }} \
+            --region ${{ env.AWS_REGION }}
+      
+      - name: Wait for deployment rollout
+        run: |
+          kubectl rollout status deployment/api-aprovacao-orcamento \
+            -n api-aprovacao-prod \
+            --timeout=10m
+      
+      - name: Create deployment tag
+        run: |
+          git tag -a "deploy-prod-$(date +%Y%m%d-%H%M%S)" \
+            -m "Production deployment: ${{ github.sha }}"
+          git push origin --tags
+
+  # ============================================
+  # Job 7: Rollback (Manual Trigger)
+  # ============================================
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Rollback deployment
+        run: |
+          kubectl rollout undo deployment/api-aprovacao-orcamento \
+            -n api-aprovacao-${{ github.event.inputs.environment }}
