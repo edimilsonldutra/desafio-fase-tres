@@ -6,10 +6,6 @@ import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.UUID;
 
-/**
- * Entidade Pessoa - representa tanto clientes quanto funcionários.
- * Relaciona-se com Cliente (1:1) ou Funcionario (1:1) dependendo do perfil.
- */
 @Entity
 @Table(name = "pessoas")
 public class Pessoa {
@@ -31,6 +27,12 @@ public class Pessoa {
     @Column(nullable = false, unique = true, length = 255)
     private String email;
 
+    @Column(name = "senha", nullable = false)
+    private String senha;
+
+    @Column(name = "ativo", nullable = false)
+    private Boolean ativo = true;
+
     @Column(length = 20)
     private String phone;
 
@@ -51,7 +53,8 @@ public class Pessoa {
     @OneToOne(mappedBy = "pessoa", cascade = CascadeType.ALL, orphanRemoval = true)
     private Cliente cliente;
 
-    // Relacionamento opcional com Funcionario (apenas se perfil = MECANICO ou ADMIN)
+    // Relacionamento opcional com Funcionario (apenas se perfil = MECANICO ou
+    // ADMIN)
     @OneToOne(mappedBy = "pessoa", cascade = CascadeType.ALL, orphanRemoval = true)
     private Funcionario funcionario;
 
@@ -70,16 +73,34 @@ public class Pessoa {
     public Pessoa() {
     }
 
-    public Pessoa(String numeroDocumento, TipoPessoa tipoPessoa, String name, String email, Perfil perfil) {
+    /**
+     * Construtor completo com senha
+     */
+    public Pessoa(String numeroDocumento, TipoPessoa tipoPessoa, String name, String email, String senha,
+            Perfil perfil) {
         validateNumeroDocumento(numeroDocumento, tipoPessoa);
         validateName(name);
         validateEmail(email);
-        
+        validateSenha(senha);
+
         this.numeroDocumento = numeroDocumento;
         this.tipoPessoa = tipoPessoa;
         this.name = name;
         this.email = email;
+        this.senha = senha;
         this.perfil = perfil;
+        this.ativo = true;
+    }
+
+    /**
+     * Construtor sem senha - utilizado apenas para testes legados
+     * 
+     * @deprecated Use o construtor com senha. Este existe apenas para
+     *             compatibilidade com testes
+     */
+    @Deprecated
+    public Pessoa(String numeroDocumento, TipoPessoa tipoPessoa, String name, String email, Perfil perfil) {
+        this(numeroDocumento, tipoPessoa, name, email, "$2a$10$defaultTestPassword", perfil);
     }
 
     // Validações
@@ -92,9 +113,8 @@ public class Pessoa {
         }
         if (!tipo.validarTamanhoDocumento(documento)) {
             throw new IllegalArgumentException(
-                "Documento inválido para " + tipo.getDisplayName() + 
-                ". Esperado: " + tipo.getTamanhoDocumento() + " dígitos"
-            );
+                    "Documento inválido para " + tipo.getDisplayName() +
+                            ". Esperado: " + tipo.getTamanhoDocumento() + " dígitos");
         }
     }
 
@@ -111,6 +131,15 @@ public class Pessoa {
         // Validação básica de email
         if (!email.matches("^[A-Za-z0-9+_.-]+@(.+)$")) {
             throw new IllegalArgumentException("Email inválido");
+        }
+    }
+
+    private void validateSenha(String senha) {
+        if (senha == null || senha.trim().isEmpty()) {
+            throw new IllegalArgumentException("Senha não pode ser nula ou vazia");
+        }
+        if (senha.length() < 6) {
+            throw new IllegalArgumentException("Senha deve ter no mínimo 6 caracteres");
         }
     }
 
@@ -179,6 +208,22 @@ public class Pessoa {
         this.perfil = perfil;
     }
 
+    public String getSenha() {
+        return senha;
+    }
+
+    public void setSenha(String senha) {
+        this.senha = senha;
+    }
+
+    public Boolean getAtivo() {
+        return ativo;
+    }
+
+    public void setAtivo(Boolean ativo) {
+        this.ativo = ativo;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -205,8 +250,10 @@ public class Pessoa {
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         Pessoa pessoa = (Pessoa) o;
         return Objects.equals(id, pessoa.id);
     }

@@ -27,7 +27,7 @@ public class GerenciarClienteUseCaseImpl implements GerenciarClienteUseCase {
     private final ClientePresenter clientePresenter;
 
     public GerenciarClienteUseCaseImpl(ClienteGateway clienteGateway,
-                                       ClientePresenter clientePresenter) {
+            ClientePresenter clientePresenter) {
         this.clienteGateway = clienteGateway;
         this.clientePresenter = clientePresenter;
     }
@@ -87,10 +87,14 @@ public class GerenciarClienteUseCaseImpl implements GerenciarClienteUseCase {
     // MÉTODOS AUXILIARES (Lógica de Negócio)
 
     private void validarCamposObrigatorios(ClienteRequestDTO dto) {
-        if (isBlank(dto.nome())) throw new BusinessException("Nome é obrigatório.");
-        if (isBlank(dto.cpfCnpj())) throw new BusinessException("CPF/CNPJ é obrigatório.");
-        if (isBlank(dto.email())) throw new BusinessException("E-mail é obrigatório.");
-        if (isBlank(dto.telefone())) throw new BusinessException("Telefone é obrigatório.");
+        if (isBlank(dto.nome()))
+            throw new BusinessException("Nome é obrigatório.");
+        if (isBlank(dto.cpfCnpj()))
+            throw new BusinessException("CPF/CNPJ é obrigatório.");
+        if (isBlank(dto.email()))
+            throw new BusinessException("E-mail é obrigatório.");
+        if (isBlank(dto.telefone()))
+            throw new BusinessException("Telefone é obrigatório.");
     }
 
     private void verificarDuplicidadeCpfCnpj(String cpfCnpj) {
@@ -117,14 +121,17 @@ public class GerenciarClienteUseCaseImpl implements GerenciarClienteUseCase {
     }
 
     private Cliente mapearParaEntidade(ClienteRequestDTO dto) {
+        // TODO: Implementar lógica de senha (ex: gerar senha temporária e enviar por
+        // email)
         Pessoa pessoa = new Pessoa(
-            DocumentoUtils.removerMascara(dto.cpfCnpj()),
-            dto.cpfCnpj().length() <= 11 ? TipoPessoa.FISICA : TipoPessoa.JURIDICA,
-            dto.nome(),
-            dto.email(),
-            Perfil.CLIENTE
-        );
+                DocumentoUtils.removerMascara(dto.cpfCnpj()),
+                dto.cpfCnpj().length() <= 11 ? TipoPessoa.FISICA : TipoPessoa.JURIDICA,
+                dto.nome(),
+                dto.email(),
+                "$2a$10$tempPasswordNeedsToBeChanged123456789", // Senha temporária
+                Perfil.CLIENTE);
         pessoa.setPhone(dto.telefone());
+        pessoa.setAtivo(true);
         Cliente cliente = new Cliente(pessoa);
         return cliente;
     }
@@ -141,4 +148,3 @@ public class GerenciarClienteUseCaseImpl implements GerenciarClienteUseCase {
         return value == null || value.trim().isEmpty();
     }
 }
-

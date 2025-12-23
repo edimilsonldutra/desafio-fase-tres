@@ -21,7 +21,7 @@ import java.util.UUID;
 @Service
 public class ClienteApplicationService implements GerenciarClienteUseCase {
 
-    //teste
+    // teste
     private final ClienteRepository clienteRepository;
 
     public ClienteApplicationService(ClienteRepository clienteRepository) {
@@ -88,10 +88,14 @@ public class ClienteApplicationService implements GerenciarClienteUseCase {
     // MÉTODOS AUXILIARES
 
     private void validarCamposObrigatorios(ClienteRequestDTO dto) {
-        if (isBlank(dto.nome())) throw new BusinessException("Nome é obrigatório.");
-        if (isBlank(dto.cpfCnpj())) throw new BusinessException("CPF/CNPJ é obrigatório.");
-        if (isBlank(dto.email())) throw new BusinessException("E-mail é obrigatório.");
-        if (isBlank(dto.telefone())) throw new BusinessException("Telefone é obrigatório.");
+        if (isBlank(dto.nome()))
+            throw new BusinessException("Nome é obrigatório.");
+        if (isBlank(dto.cpfCnpj()))
+            throw new BusinessException("CPF/CNPJ é obrigatório.");
+        if (isBlank(dto.email()))
+            throw new BusinessException("E-mail é obrigatório.");
+        if (isBlank(dto.telefone()))
+            throw new BusinessException("Telefone é obrigatório.");
     }
 
     private void verificarDuplicidadeCpfCnpj(String cpfCnpj) {
@@ -120,15 +124,18 @@ public class ClienteApplicationService implements GerenciarClienteUseCase {
     private Cliente mapearParaEntidade(ClienteRequestDTO dto) {
         String documentoSemMascara = DocumentoUtils.removerMascara(dto.cpfCnpj());
         TipoPessoa tipoPessoa = documentoSemMascara.length() <= 11 ? TipoPessoa.FISICA : TipoPessoa.JURIDICA;
-        
+
+        // TODO: Implementar lógica de senha (ex: gerar senha temporária e enviar por
+        // email)
         Pessoa pessoa = new Pessoa(
-            documentoSemMascara,
-            tipoPessoa,
-            dto.nome(),
-            dto.email(),
-            Perfil.CLIENTE
-        );
+                documentoSemMascara,
+                tipoPessoa,
+                dto.nome(),
+                dto.email(),
+                "$2a$10$tempPasswordNeedsToBeChanged123456789", // Senha temporária
+                Perfil.CLIENTE);
         pessoa.setPhone(dto.telefone());
+        pessoa.setAtivo(true);
         Cliente cliente = new Cliente(pessoa);
         return cliente;
     }

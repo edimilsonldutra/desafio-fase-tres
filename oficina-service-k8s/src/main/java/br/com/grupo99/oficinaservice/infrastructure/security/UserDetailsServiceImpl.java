@@ -1,24 +1,34 @@
 package br.com.grupo99.oficinaservice.infrastructure.security;
 
-import org.springframework.security.core.userdetails.User;
+import br.com.grupo99.oficinaservice.domain.model.Pessoa;
+import br.com.grupo99.oficinaservice.domain.repository.PessoaRepository;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 
 @Service
 public class UserDetailsServiceImpl implements UserDetailsService {
 
+    private final PessoaRepository pessoaRepository;
+
+    public UserDetailsServiceImpl(PessoaRepository pessoaRepository) {
+        this.pessoaRepository = pessoaRepository;
+    }
+
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        // TODO: Implementar a busca do utilizador no banco de dados (ex: ClienteRepository)
-        // Por enquanto, usaremos um utilizador em memória para fins de demonstração.
-        if ("admin".equals(username)) {
-            return new User("admin", "$2a$10$slYQmyNdGzTn7ZLBXBChFOC9f6kFjAqPhccnP6DxlWXx2lPk1C3G6", new ArrayList<>()); // senha = "password"
-        } else {
-            throw new UsernameNotFoundException("Utilizador não encontrado: " + username);
+        // Buscamos a pessoa pelo email (que é usado como username)
+        Pessoa pessoa = pessoaRepository.findByEmail(username)
+                .orElseThrow(() -> new UsernameNotFoundException("Usuário não encontrado: " + username));
+
+        // Verifica se a conta está ativa
+        if (pessoa.getAtivo() == null || !pessoa.getAtivo()) {
+            throw new UsernameNotFoundException("Conta desativada: " + username);
         }
+
+        // Adapta a entidade Pessoa para UserDetails
+        return new UserDetailsImpl(pessoa);
     }
 }

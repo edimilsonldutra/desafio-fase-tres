@@ -1,131 +1,127 @@
 package br.com.grupo99.oficinaservice.infrastructure.security;
 
+import br.com.grupo99.oficinaservice.domain.model.Perfil;
+import br.com.grupo99.oficinaservice.domain.model.Pessoa;
+import br.com.grupo99.oficinaservice.domain.model.TipoPessoa;
+import br.com.grupo99.oficinaservice.domain.repository.PessoaRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import br.com.grupo99.oficinaservice.domain.model.Cliente;
-import br.com.grupo99.oficinaservice.domain.model.Pessoa;
-import br.com.grupo99.oficinaservice.domain.model.Perfil;
-import br.com.grupo99.oficinaservice.domain.model.TipoPessoa;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("Testes unitários para UserDetailsServiceImpl")
 class UserDetailsServiceImplTest {
-    private Cliente criarClienteComPessoa(String nome, String documento) {
-        Pessoa pessoa = new Pessoa(documento, TipoPessoa.FISICA, nome, 
-            nome.toLowerCase().replace(" ", "") + "@email.com", Perfil.CLIENTE);
-        return new Cliente(pessoa);
-    }
 
+    @Mock
+    private PessoaRepository pessoaRepository;
 
     @InjectMocks
     private UserDetailsServiceImpl userDetailsService;
 
+    private Pessoa pessoaAtiva;
+    private Pessoa pessoaInativa;
+
+    @BeforeEach
+    void setUp() {
+        pessoaAtiva = new Pessoa(
+                "12345678900",
+                TipoPessoa.FISICA,
+                "João Silva",
+                "joao@teste.com",
+                "$2a$10$slYQmyNdGzTn7ZLBXBChFOC9f6kFjAqPhccnP6DxlWXx2lPk1C3G6",
+                Perfil.ADMIN);
+        pessoaAtiva.setAtivo(true);
+
+        pessoaInativa = new Pessoa(
+                "98765432100",
+                TipoPessoa.FISICA,
+                "Maria Santos",
+                "maria@teste.com",
+                "$2a$10$slYQmyNdGzTn7ZLBXBChFOC9f6kFjAqPhccnP6DxlWXx2lPk1C3G6",
+                Perfil.CLIENTE);
+        pessoaInativa.setAtivo(false);
+    }
+
     @Test
-    @DisplayName("Deve carregar usuário admin com sucesso")
-    void shouldLoadAdminUserSuccessfully() {
+    @DisplayName("Deve carregar usuário por email com sucesso")
+    void shouldLoadUserByEmailSuccessfully() {
+        // Given
+        when(pessoaRepository.findByEmail("joao@teste.com"))
+                .thenReturn(Optional.of(pessoaAtiva));
+
         // When
-        UserDetails userDetails = userDetailsService.loadUserByUsername("admin");
+        UserDetails userDetails = userDetailsService.loadUserByUsername("joao@teste.com");
 
         // Then
         assertThat(userDetails).isNotNull();
-        assertThat(userDetails.getUsername()).isEqualTo("admin");
-        assertThat(userDetails.getPassword()).isEqualTo("$2a$10$slYQmyNdGzTn7ZLBXBChFOC9f6kFjAqPhccnP6DxlWXx2lPk1C3G6");
-        assertThat(userDetails.getAuthorities()).isEmpty();
+        assertThat(userDetails.getUsername()).isEqualTo("joao@teste.com");
         assertThat(userDetails.isEnabled()).isTrue();
-        assertThat(userDetails.isAccountNonExpired()).isTrue();
-        assertThat(userDetails.isAccountNonLocked()).isTrue();
-        assertThat(userDetails.isCredentialsNonExpired()).isTrue();
+        assertThat(userDetails.getAuthorities()).isNotEmpty();
+        assertThat(userDetails.getAuthorities()).anyMatch(auth -> auth.getAuthority().equals("ROLE_ADMIN"));
     }
 
     @Test
     @DisplayName("Deve lançar UsernameNotFoundException para usuário não encontrado")
-    void shouldThrowUsernameNotFoundExceptionForNonExistentUser() {
-        // When & Then
-        assertThatThrownBy(() -> userDetailsService.loadUserByUsername("inexistente"))
-                .isInstanceOf(UsernameNotFoundException.class)
-                .hasMessage("Utilizador não encontrado: inexistente");
-    }
-
-    @Test
-    @DisplayName("Deve lançar UsernameNotFoundException para username null")
-    void shouldThrowUsernameNotFoundExceptionForNullUsername() {
-        // When & Then
-        assertThatThrownBy(() -> userDetailsService.loadUserByUsername(null))
-                .isInstanceOf(UsernameNotFoundException.class)
-                .hasMessage("Utilizador não encontrado: null");
-    }
-
-    @Test
-    @DisplayName("Deve lançar UsernameNotFoundException para username vazio")
-    void shouldThrowUsernameNotFoundExceptionForEmptyUsername() {
-        // When & Then
-        assertThatThrownBy(() -> userDetailsService.loadUserByUsername(""))
-                .isInstanceOf(UsernameNotFoundException.class)
-                .hasMessage("Utilizador não encontrado: ");
-    }
-
-    @Test
-    @DisplayName("Deve ser case sensitive para username")
-    void shouldBeCaseSensitiveForUsername() {
-        // When & Then
-        assertThatThrownBy(() -> userDetailsService.loadUserByUsername("ADMIN"))
-                .isInstanceOf(UsernameNotFoundException.class)
-                .hasMessage("Utilizador não encontrado: ADMIN");
-    }
-
-    @Test
-    @DisplayName("Deve lançar UsernameNotFoundException para username com espaços")
-    void shouldThrowUsernameNotFoundExceptionForUsernameWithSpaces() {
-        // When & Then
-        assertThatThrownBy(() -> userDetailsService.loadUserByUsername(" admin "))
-                .isInstanceOf(UsernameNotFoundException.class)
-                .hasMessage("Utilizador não encontrado:  admin ");
-    }
-
-    @Test
-    @DisplayName("Deve lançar UsernameNotFoundException para outros usernames válidos")
-    void shouldThrowUsernameNotFoundExceptionForOtherValidUsernames() {
+    void shouldThrowExceptionWhenUserNotFound() {
         // Given
-        String[] invalidUsernames = {"user", "test", "administrator", "root", "guest"};
+        when(pessoaRepository.findByEmail(anyString()))
+                .thenReturn(Optional.empty());
 
         // When & Then
-        for (String username : invalidUsernames) {
-            assertThatThrownBy(() -> userDetailsService.loadUserByUsername(username))
-                    .isInstanceOf(UsernameNotFoundException.class)
-                    .hasMessage("Utilizador não encontrado: " + username);
-        }
+        assertThatThrownBy(() -> userDetailsService.loadUserByUsername("naoexiste@teste.com"))
+                .isInstanceOf(UsernameNotFoundException.class)
+                .hasMessageContaining("Usuário não encontrado");
     }
 
     @Test
-    @DisplayName("Deve retornar UserDetails com coleção de authorities vazia")
-    void shouldReturnUserDetailsWithEmptyAuthoritiesCollection() {
-        // When
-        UserDetails userDetails = userDetailsService.loadUserByUsername("admin");
+    @DisplayName("Deve lançar exceção quando conta inativa")
+    void shouldThrowExceptionWhenAccountInactive() {
+        // Given
+        when(pessoaRepository.findByEmail("maria@teste.com"))
+                .thenReturn(Optional.of(pessoaInativa));
 
-        // Then
-        assertThat(userDetails.getAuthorities()).isNotNull();
-        assertThat(userDetails.getAuthorities()).isEmpty();
+        // When & Then
+        assertThatThrownBy(() -> userDetailsService.loadUserByUsername("maria@teste.com"))
+                .isInstanceOf(UsernameNotFoundException.class)
+                .hasMessageContaining("Conta desativada");
     }
 
     @Test
-    @DisplayName("Deve retornar UserDetails com todas as flags de conta ativas")
-    void shouldReturnUserDetailsWithAllAccountFlagsEnabled() {
+    @DisplayName("Deve retornar UserDetailsImpl com perfil correto")
+    void shouldReturnUserDetailsImplWithCorrectProfile() {
+        // Given
+        Pessoa mecanico = new Pessoa(
+                "11111111111",
+                TipoPessoa.FISICA,
+                "Carlos Mecânico",
+                "carlos@teste.com",
+                "$2a$10$encoded",
+                Perfil.MECANICO);
+        mecanico.setAtivo(true);
+
+        when(pessoaRepository.findByEmail("carlos@teste.com"))
+                .thenReturn(Optional.of(mecanico));
+
         // When
-        UserDetails userDetails = userDetailsService.loadUserByUsername("admin");
+        UserDetails userDetails = userDetailsService.loadUserByUsername("carlos@teste.com");
 
         // Then
-        assertThat(userDetails.isEnabled()).isTrue();
-        assertThat(userDetails.isAccountNonExpired()).isTrue();
-        assertThat(userDetails.isAccountNonLocked()).isTrue();
-        assertThat(userDetails.isCredentialsNonExpired()).isTrue();
+        assertThat(userDetails).isInstanceOf(UserDetailsImpl.class);
+        UserDetailsImpl userDetailsImpl = (UserDetailsImpl) userDetails;
+        assertThat(userDetailsImpl.getPessoa().getPerfil()).isEqualTo(Perfil.MECANICO);
+        assertThat(userDetails.getAuthorities()).anyMatch(auth -> auth.getAuthority().equals("ROLE_MECANICO"));
     }
 }

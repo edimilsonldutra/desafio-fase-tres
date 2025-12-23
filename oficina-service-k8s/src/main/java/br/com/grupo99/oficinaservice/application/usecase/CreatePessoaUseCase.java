@@ -37,15 +37,18 @@ public class CreatePessoaUseCase {
         }
 
         // Criar a entidade Pessoa
+        // TODO: Implementar lógica de senha (ex: gerar senha temporária e enviar por
+        // email)
         Pessoa pessoa = new Pessoa(
-            request.numeroDocumento(),
-            request.tipoPessoa(),
-            request.name(),
-            request.email(),
-            request.perfil()
-        );
+                request.numeroDocumento(),
+                request.tipoPessoa(),
+                request.name(),
+                request.email(),
+                "$2a$10$tempPasswordNeedsToBeChanged123456789", // Senha temporária que deve ser alterada
+                request.perfil());
         pessoa.setPhone(request.phone());
         pessoa.setCargo(request.cargo());
+        pessoa.setAtivo(true);
 
         // Salvar a pessoa
         pessoa = pessoaRepository.save(pessoa);
